@@ -1,0 +1,1613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="shortcut icon" href="/img/apple.ico" type="image/x-icon" />
+    <title>Home Network Server Status</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1e40af;
+            --secondary: #64748b;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --dark: #0f172a;
+            --dark-alt: #1e293b;
+            --dark-card: #334155;
+            --light: #f8fafc;
+            --border: #475569;
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, var(--dark) 0%, var(--dark-alt) 100%);
+            min-height: 100vh;
+            color: var(--text-primary);
+        }
+
+        /* Header */
+        #main-title-container {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            padding: 20px 40px;
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+        }
+
+        #last-updated-display {
+            justify-self: start;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        #last-updated-display::before {
+            content: "⟳";
+            font-size: 1.2rem;
+        }
+
+        #main-title-container h1 {
+            justify-self: center;
+            font-size: 1.5rem;
+            font-weight: 600;
+            letter-spacing: -0.025em;
+            background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .wan-status-badge {
+            font-size: 0.875rem;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-weight: 600;
+            letter-spacing: 0.025em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s ease;
+            /* ADDED for the connection line animation */
+            position: relative;
+            z-index: 2;
+        }
+
+        .wan-status-badge::before {
+            content: "●";
+            font-size: 1.2rem;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        /* NEW: Animation for the connection line flow */
+        @keyframes subtleFlow {
+            0% { background-position: 0% 0; }
+            100% { background-position: 100% 0; }
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* REPLACEMENT for original @keyframes statusChange */
+        /* NEW ANIMATIONS: singleFlash for server offline or initial load (Flash Once) */
+        @keyframes singleFlash {
+            0% { transform: scale(1); border-color: var(--warning); }
+            50% { transform: scale(1.05); border-color: var(--warning); }
+            100% { transform: scale(1); border-color: var(--border); }
+        }
+
+        /* Double flash for service changes (Flash Twice - based on original structure) */
+        @keyframes doubleFlash {
+            0% { transform: scale(1); border-color: var(--warning); }
+            25% { transform: scale(1.05); border-color: var(--warning); }
+            50% { transform: scale(1); border-color: var(--warning); }
+            75% { transform: scale(1.05); border-color: var(--warning); }
+            100% { transform: scale(1); border-color: var(--border); }
+        }
+
+        @keyframes flashWarning {
+            0%, 100% {
+                background: rgba(245, 158, 11, 0.2);
+                box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7);
+            }
+            50% {
+                background: rgba(245, 158, 11, 0.4);
+                box-shadow: 0 0 0 10px rgba(245, 158, 11, 0);
+            }
+        }
+
+        /* NEW ANIMATION CLASSES (REPLACING .status-changed) */
+        .single-flash {
+            animation: singleFlash 0.6s ease-in-out;
+        }
+
+        .double-flash {
+            animation: doubleFlash 0.6s ease-in-out;
+        }
+
+
+        .speed-warning {
+            background: rgba(245, 158, 11, 0.2) !important;
+            color: var(--warning) !important;
+            border: 1px solid var(--warning) !important;
+            animation: flashWarning 2s ease-in-out infinite;
+        }
+
+
+        /* Controls */
+        .edit-controls {
+            text-align: center;
+            padding: 16px;
+            background: rgba(30, 41, 59, 0.5);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .edit-controls button {
+            /* Inherited style for Manage Servers and Internet Health */
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.3);
+            margin: 4px;
+        }
+
+        .edit-controls button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.4);
+        }
+
+        /* Scan Button Style */
+        #start-scan-btn {
+            background: linear-gradient(135deg, var(--success) 0%, #059669 100%);
+            box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.3);
+        }
+
+        #start-scan-btn:hover {
+            box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.4);
+        }
+
+        /* Server Grid */
+        #server-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: 20px;
+            padding: 24px 40px 10px 40px;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        /* Network Scan Section */
+        #network-scan-container {
+            padding: 10px 40px 24px 40px;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        #network-scan-container h2 {
+            color: var(--text-primary);
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        #scan-results-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: 20px;
+            margin-top: 15px;
+        }
+
+        .add-server-from-scan-btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 6px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            margin-top: 8px;
+            display: inline-block;
+        }
+
+        .add-server-from-scan-btn:hover {
+            background: var(--primary-dark);
+        }
+        /* END NEW */
+
+        /* Server Cards */
+        .server-card {
+            background: linear-gradient(135deg, rgba(51, 65, 85, 0.9) 0%, rgba(30, 41, 59, 0.9) 100%);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .server-card::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--primary) 0%, var(--primary-dark) 100%);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .server-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4);
+            border-color: var(--primary);
+        }
+
+        .server-card:hover::before {
+            opacity: 1;
+        }
+
+        .server-card h2 {
+            color: var(--text-primary);
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .server-icon {
+            font-size: 1.25rem;
+        }
+
+        /* Status Badges */
+        .status-badge {
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.05em;
+        }
+
+        .status-badge::before {
+            content: "●";
+            font-size: 1rem;
+        }
+
+        .status-online {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--success);
+            border: 1px solid var(--success);
+        }
+
+        .status-offline {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--danger);
+            border: 1px solid var(--danger);
+        }
+
+        .data-label {
+            font-weight: 600;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .server-card > p {
+            margin: 8px 0;
+            color: var(--text-primary);
+            font-size: 0.875rem;
+        }
+
+        /* Services */
+        .server-card > p:first-of-type {
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            margin-bottom: 12px;
+        }
+
+        .server-card ul {
+            list-style: none;
+            margin-top: 12px;
+            background: rgba(15, 23, 42, 0.5);
+            border-radius: 8px;
+            padding: 8px;
+        }
+
+        .server-card ul li {
+            padding: 6px 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(71, 85, 105, 0.5);
+            font-size: 0.8rem;
+        }
+
+        .server-card ul li:last-child {
+            border-bottom: none;
+        }
+
+        .service-status-online {
+            color: var(--success);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .service-status-online::before {
+            content: "✓";
+            font-size: 1rem;
+        }
+
+        .service-status-down {
+            color: var(--danger);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .service-status-down::before {
+            content: "✕";
+            font-size: 1rem;
+        }
+
+        /* Loading */
+        .spinner {
+            margin-right: 12px;
+            color: var(--primary);
+        }
+
+        #loading-status {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+            font-size: 1.125rem;
+        }
+
+        /* Edit/Internet Panel (Re-use styles) */
+        #edit-panel,
+        #internet-panel {
+            max-width: 700px;
+            margin: 30px auto;
+            padding: 32px;
+            background: linear-gradient(135deg, rgba(51, 65, 85, 0.95) 0%, rgba(30, 41, 59, 0.95) 100%);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            display: none;
+        }
+
+        #edit-panel h2,
+        #internet-panel h2 {
+            color: var(--text-primary);
+            margin-bottom: 24px;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        #internet-panel-content p {
+            font-size: 1.125rem;
+            margin-bottom: 10px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        #internet-panel-content span {
+            color: var(--text-primary);
+            float: right;
+            font-weight: 700;
+        }
+
+        /* Ensure charts take up available space */
+        #latencyChart, #speedChart {
+            max-height: 150px;
+        }
+
+
+        /* ... (rest of edit-panel styles for inputs) ... */
+
+        .server-input-group {
+            background: rgba(15, 23, 42, 0.5);
+            border: 1px solid var(--border);
+            padding: 20px;
+            margin-bottom: 16px;
+            border-radius: 8px;
+            position: relative;
+            transition: border-color 0.3s ease;
+        }
+
+        .server-input-group:hover {
+            border-color: var(--primary);
+        }
+
+        .server-input-group label {
+            display: block;
+            margin-top: 12px;
+            margin-bottom: 6px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .server-input-group input,
+        .server-input-group select {
+            width: 100%;
+            padding: 10px 12px;
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 0.95rem;
+            transition: all 0.3s ease;
+        }
+
+        .server-input-group select {
+            cursor: pointer;
+        }
+
+        .server-input-group input:focus,
+        .server-input-group select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+        }
+
+        .icon-preview {
+            display: inline-block;
+            font-size: 1.5rem;
+            margin-left: 10px;
+            vertical-align: middle;
+        }
+
+        .edit-buttons {
+            margin-top: 24px;
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+
+        .edit-buttons button {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.875rem;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .edit-buttons button:hover {
+            transform: translateY(-2px);
+        }
+
+        #add-server-btn {
+            background: linear-gradient(135deg, var(--success) 0%, #059669 100%);
+            color: white;
+            border: none;
+            box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.3);
+        }
+
+        #save-servers-btn {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            border: none;
+            box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.3);
+        }
+
+        #close-panel-btn,
+        #close-internet-btn {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+            box-shadow: none;
+        }
+
+        #close-panel-btn:hover,
+        #close-internet-btn:hover {
+            transform: none;
+            color: var(--primary);
+            border-color: var(--primary);
+        }
+
+        .remove-server-btn {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            color: var(--danger);
+            cursor: pointer;
+            border: none;
+            background: rgba(239, 68, 68, 0.1);
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 1.2rem;
+            transition: all 0.3s ease;
+        }
+
+        .remove-server-btn:hover {
+            background: rgba(239, 68, 68, 0.2);
+            transform: scale(1.1);
+        }
+
+        #edit-message {
+            margin-top: 20px;
+            padding: 14px 18px;
+            border-radius: 8px;
+            display: none;
+            font-weight: 600;
+            font-size: 0.875rem;
+        }
+
+        .msg-success {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--success);
+            border: 1px solid var(--success);
+        }
+
+        .msg-error {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--danger);
+            border: 1px solid var(--danger);
+        }
+
+        .msg-neutral {
+            background: rgba(100, 116, 139, 0.2);
+            color: var(--text-secondary);
+            border: 1px solid var(--secondary);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            #main-title-container {
+                grid-template-columns: 1fr;
+                gap: 12px;
+                padding: 16px 20px;
+                text-align: center;
+            }
+
+            #last-updated-display,
+            .wan-status-badge {
+                justify-self: center;
+            }
+
+            #main-title-container h1 {
+                font-size: 1.25rem;
+            }
+
+            #server-list,
+            #network-scan-container {
+                grid-template-columns: 1fr;
+                padding: 20px;
+                gap: 16px;
+            }
+
+            .edit-buttons {
+                flex-direction: column;
+            }
+
+            .edit-controls button {
+                margin: 5px 0;
+                display: block;
+                width: 100%;
+            }
+        }
+
+        /* --- STYLES for Top Right Badges (Button Look) --- */
+
+        /* Base style for the Network Speed Display */
+        #network-speed-display {
+            font-weight: 700 !important;
+            border: none !important;
+            background: var(--dark-card) !important;
+            color: var(--text-primary) !important;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+            animation: none !important;
+        }
+
+        /* Network Speed: Online (Good Speed) - Primary Blue Gradient */
+        #network-speed-display.status-online {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%) !important;
+            color: white !important;
+        }
+
+        /* Network Speed: Offline (Test Failed) - Danger Red Gradient */
+        #network-speed-display.status-offline {
+            background: linear-gradient(135deg, var(--danger) 0%, #c22f2f 100%) !important;
+            color: white !important;
+        }
+
+        /* Network Speed: Warning (Slow Speed) - Warning Orange Gradient */
+        #network-speed-display.speed-warning {
+            background: linear-gradient(135deg, var(--warning) 0%, #d97706 100%) !important;
+            color: var(--dark-alt) !important;
+            box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.4) !important;
+            animation: none !important;
+        }
+
+        /* WAN Status Badge - Apply a similar look using the Success Green gradient */
+        .wan-status-badge {
+            font-weight: 700 !important;
+            border: none !important;
+            color: white !important;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+            animation: none !important;
+        }
+
+        /* WAN Status: Online - Success Green Gradient */
+        .wan-status-badge.status-online {
+            background: linear-gradient(135deg, var(--success) 0%, #059669 100%) !important;
+        }
+
+        /* WAN Status: Offline - Danger Red Gradient */
+        .wan-status-badge.status-offline {
+            background: linear-gradient(135deg, var(--danger) 0%, #c22f2f 100%) !important;
+        }
+
+        /* Restore/adjust the status indicator dot */
+        .wan-status-badge::before {
+            color: white !important;
+            animation: pulse 2s ease-in-out infinite !important;
+        }
+
+        /* --- ADDED: THE CONNECTION LINE ANIMATION --- */
+
+        /* The visual line/cable connecting the WAN status to the local speed badge */
+        .wan-status-badge::after {
+            content: '';
+            position: absolute;
+            height: 3px;
+            width: 10px;
+            top: 50%;
+            right: 100%; /* Positioned to the left of the badge */
+            margin-right: 6px; /* Spans the gap between the two badges */
+            transform: translateY(-50%);
+            background: var(--success); /* Default to online color */
+            box-shadow: 0 0 5px rgba(16, 185, 129, 0.5); /* Subtle glow */
+            pointer-events: none;
+            z-index: 1;
+            transition: all 0.3s ease;
+        }
+
+        /* Apply visual flow when ONLINE */
+        .wan-status-badge.status-online::after {
+            /* Create a repeating pattern that moves */
+            background: repeating-linear-gradient(
+                90deg,
+                var(--success),
+                var(--success) 3px,
+                rgba(15, 23, 42, 0.4) 3px, /* Dark segment */
+                rgba(15, 23, 42, 0.4) 6px
+            );
+            background-size: 200% 100%;
+            box-shadow: 0 0 5px var(--success);
+            animation: subtleFlow 1s linear infinite;
+        }
+
+        /* Change color and stop flow when OFFLINE */
+        .wan-status-badge.status-offline::after {
+            background: var(--danger);
+            box-shadow: 0 0 5px var(--danger);
+            animation: none;
+        }
+        /* --- END ADDED STYLES --- */
+    </style>
+</head>
+<body>
+
+    <div id="main-title-container">
+        <div id="last-updated-display">
+            <span id="last-updated">--:--:--</span>
+        </div>
+
+        <h1>Network Infrastructure Dashboard</h1>
+
+        <div style="display: flex; gap: 12px; align-items: center; justify-self: end;">
+            <span id="network-speed-display" class="status-badge status-offline" style="font-size: 0.75rem; padding: 6px 12px;">
+                <i class="fa fa-tachometer"></i> <span id="speed-text">Testing...</span>
+            </span>
+            <span id="wan-status-display" class="status-badge status-offline wan-status-badge">Internet: Checking...</span>
+        </div>
+    </div>
+
+    <div class="edit-controls">
+        <button id="toggle-edit-btn" onclick="toggleEditPanel()">
+            <i class="fa fa-cog"></i> Manage Servers
+        </button>
+        <button id="start-scan-btn" onclick="startNetworkScan()">
+            <i class="fa fa-search"></i> Scan Network
+        </button>
+        <button id="internet-health-btn" onclick="toggleInternetPanel()">
+            <i class="fa fa-heartbeat"></i> Internet Health
+        </button>
+    </div>
+
+    <div id="internet-panel" class="edit-panel" style="max-width: 500px;">
+        <h2><i class="fa fa-heartbeat"></i> Detailed Internet Health</h2>
+        <div id="internet-panel-content">
+            <p id="internet-panel-latency">Latency (Ping): <span id="internet-latency-val">--</span></p>
+            <p id="internet-panel-download">Download Speed: <span id="internet-download-val">--</span></p>
+
+            <h3 style="margin-top: 20px; color: var(--text-primary); font-size: 1.2rem;">Latency History (ms)</h3>
+            <div style="height: 150px; margin-bottom: 20px;">
+                <canvas id="latencyChart"></canvas>
+            </div>
+
+            <h3 style="margin-top: 20px; color: var(--text-primary); font-size: 1.2rem;">Download Speed History (Mbps)</h3>
+            <div style="height: 150px;">
+                <canvas id="speedChart"></canvas>
+            </div>
+
+            <p style="font-size: 0.8rem; color: var(--warning); margin-top: 15px;">
+                This test runs every 15 seconds while this panel is open.
+            </p>
+        </div>
+
+    </div>
+
+    <div id="edit-panel">
+        <h2>Server Configuration</h2>
+        <div id="server-inputs-container"></div>
+        <div class="edit-buttons">
+            <button id="add-server-btn" onclick="addServerInput()">
+                <i class="fa fa-plus"></i> Add Server
+            </button>
+            <button id="save-servers-btn" onclick="saveServers()">
+                <i class="fa fa-save"></i> Save Changes
+            </button>
+            <button id="close-panel-btn" onclick="toggleEditPanel()">
+                Cancel
+            </button>
+        </div>
+        <div id="edit-message"></div>
+    </div>
+
+    <div id="server-list">
+        <p id="loading-status">
+            <i class="fa fa-spinner fa-spin spinner"></i>
+            Initializing dashboard...
+        </p>
+    </div>
+
+    <div id="network-scan-container">
+        <h2>Network Scan Results <i class="fa fa-search-plus"></i></h2>
+        <p id="scan-status" style="margin-bottom: 20px; color: var(--text-secondary);">Click "Scan Network" to find new devices.</p>
+        <div id="scan-results-list">
+            </div>
+    </div>
+
+    <script>
+        const API_URL = 'get_server_info.php';
+        const SAVE_API_URL = 'save_servers.php';
+        const SCAN_API_URL = 'network_scan.php';
+        const REFRESH_INTERVAL = 30000;
+
+        const listContainer = document.getElementById('server-list');
+        const loadingStatusElement = document.getElementById('loading-status');
+        const editPanel = document.getElementById('edit-panel');
+        const serverInputsContainer = document.getElementById('server-inputs-container');
+        const editMessage = document.getElementById('edit-message');
+        const wanDisplay = document.getElementById('wan-status-display');
+        const lastUpdatedSpan = document.getElementById('last-updated');
+        const speedDisplay = document.getElementById('network-speed-display');
+        const speedText = document.getElementById('speed-text');
+
+        // INTERNET HEALTH ELEMENTS
+        const internetPanel = document.getElementById('internet-panel');
+        const internetLatencyVal = document.getElementById('internet-latency-val');
+        const internetDownloadVal = document.getElementById('internet-download-val');
+        let pingIntervalId = null;
+
+        // CHARTING VARIABLES
+        const MAX_DATA_POINTS = 20; // Last 20 points (5 minutes @ 15 second intervals)
+        let latencyHistory = [];
+        let downloadHistory = [];
+        let latencyChartInstance = null;
+        let speedChartInstance = null;
+
+        // SCAN ELEMENTS
+        const scanStatusElement = document.getElementById('scan-status');
+        const scanResultsList = document.getElementById('scan-results-list');
+        const startScanBtn = document.getElementById('start-scan-btn');
+
+        let serverConfigData = { servers: [] };
+        let previousServerStates = {};
+        let previousSpeedWarning = false;
+
+        // Available server icons
+        const serverIcons = {
+            '🖥️': 'Server',
+            '📡': 'Radio/Antenna',
+            '🎬': 'Media Server',
+            '💾': 'Storage/NAS',
+            '🔒': 'Security',
+            '🌐': 'Router/Gateway',
+            '📹': 'Camera',
+            '🏠': 'Home Automation',
+            '🎮': 'Gaming',
+            '☁️': 'Cloud',
+            '🔧': 'Tools/Utilities',
+            '📊': 'Monitoring'
+        };
+
+        // Server Categories and Sort Ranks
+        const serverCategories = [
+            { value: '10', label: '10 - Router/Gateway' },
+            { value: '20', label: '20 - Primary Server (General)' },
+            { value: '30', label: '30 - NAS/Storage' },
+            { value: '40', label: '40 - Media Server (Plex, etc.)' },
+            { value: '50', label: '50 - Utility/Tool' },
+            { value: '99', label: '99 - Other/Unknown' }
+        ];
+
+
+        function createServiceList(services) {
+            let html = '<p><span class="data-label">Services</span></p><ul>';
+            for (const [service, status] of Object.entries(services)) {
+                const displayStatus = status === 'Online' ? 'Online' : 'Offline';
+                const statusClass = status === 'Online' ? 'service-status-online' : 'service-status-down';
+                html += `<li><span>${service}</span><span class="${statusClass}">${displayStatus}</span></li>`;
+            }
+            html += '</ul>';
+            return html;
+        }
+
+        function updateWanStatus(status) {
+            const wanIsOnline = status.toLowerCase() === 'online';
+            wanDisplay.textContent = `Internet: ${status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()}`;
+
+            // Check for status change based on previous state
+            const wanKey = 'WAN';
+            const wanStateChanged = previousServerStates[wanKey] !== undefined && previousServerStates[wanKey] !== wanIsOnline;
+
+            // Only update classes/animation if status changed or it's the initial load
+            if (wanStateChanged || previousServerStates[wanKey] === undefined) {
+                 wanDisplay.classList.remove('status-online', 'status-offline');
+                 wanDisplay.classList.add(wanIsOnline ? 'status-online' : 'status-offline');
+
+                 if (wanStateChanged) {
+                    wanDisplay.classList.add('single-flash'); // Use the new single-flash class
+                    setTimeout(() => wanDisplay.classList.remove('single-flash'), 600);
+                }
+            }
+
+            previousServerStates[wanKey] = wanIsOnline;
+        }
+
+        // CHARTING FUNCTIONS
+        function initCharts() {
+            // Chart.js options for time series data
+            const chartOptions = (color, minVal) => ({
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { mode: 'index', intersect: false }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: { unit: 'second', tooltipFormat: 'HH:mm:ss' },
+                        ticks: { color: '#e2e8f0' },
+                        grid: { color: 'rgba(71, 85, 105, 0.3)' }
+                    },
+                    y: {
+                        min: minVal,
+                        ticks: { color: '#e2e8f0' },
+                        grid: { color: 'rgba(71, 85, 105, 0.3)' },
+                        title: { display: false }
+                    }
+                }
+            });
+
+            // Latency Chart
+            latencyChartInstance = new Chart(document.getElementById('latencyChart').getContext('2d'), {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: 'Latency (ms)',
+                        data: latencyHistory,
+                        borderColor: 'var(--primary)',
+                        backgroundColor: 'rgba(37, 99, 235, 0.2)',
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 0
+                    }]
+                },
+                options: chartOptions('var(--primary)', 0)
+            });
+
+            // Speed Chart
+            speedChartInstance = new Chart(document.getElementById('speedChart').getContext('2d'), {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: 'Download Speed (Mbps)',
+                        data: downloadHistory,
+                        borderColor: 'var(--success)',
+                        backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 0
+                    }]
+                },
+                options: chartOptions('var(--success)', 0)
+            });
+        }
+
+        function updateCharts(latency, download) {
+            const now = Date.now();
+
+            // 1. Manage Latency Data
+            latencyHistory.push({ x: now, y: latency });
+            if (latencyHistory.length > MAX_DATA_POINTS) {
+                latencyHistory.shift();
+            }
+
+            // 2. Manage Download Data
+            downloadHistory.push({ x: now, y: download });
+            if (downloadHistory.length > MAX_DATA_POINTS) {
+                downloadHistory.shift();
+            }
+
+            // 3. Update Chart Instances
+            if (latencyChartInstance) {
+                latencyChartInstance.data.datasets[0].data = latencyHistory;
+                latencyChartInstance.update();
+            }
+            if (speedChartInstance) {
+                speedChartInstance.data.datasets[0].data = downloadHistory;
+                speedChartInstance.update();
+            }
+        }
+        // END CHARTING FUNCTIONS
+
+
+        // INTERNET HEALTH PANEL FUNCTIONS
+        function toggleInternetPanel() {
+            if (editPanel.style.display === 'block') {
+                toggleEditPanel();
+            }
+
+            if (internetPanel.style.display === 'block') {
+                internetPanel.style.display = 'none';
+                // Stop interval
+                if (pingIntervalId) {
+                    clearInterval(pingIntervalId);
+                    pingIntervalId = null;
+                    console.log("Internet health test stopped.");
+                }
+                // Destroy charts and clear data
+                if (latencyChartInstance) latencyChartInstance.destroy();
+                if (speedChartInstance) speedChartInstance.destroy();
+                latencyHistory = [];
+                downloadHistory = [];
+                latencyChartInstance = null;
+                speedChartInstance = null;
+
+            } else {
+                internetPanel.style.display = 'block';
+                // Initialize charts first
+                initCharts();
+                // Run test immediately and start interval
+                startSimplifiedInternetTest();
+                if (!pingIntervalId) {
+                    pingIntervalId = setInterval(startSimplifiedInternetTest, 15000);
+                    console.log("Internet health test started, running every 15s.");
+                }
+            }
+        }
+
+        async function startSimplifiedInternetTest() {
+            internetLatencyVal.textContent = 'Testing...';
+            internetDownloadVal.textContent = 'Testing...';
+
+            try {
+                const response = await fetch(API_URL + '?simplified_ping=true');
+                const data = await response.json();
+
+                if (!response.ok || data.error) {
+                    throw new Error(data.error || 'Server returned an error.');
+                }
+
+                const rawLatency = data.latency_ms > 0 ? data.latency_ms : 0;
+                const rawDownload = data.download_mbps > 0 ? data.download_mbps : 0;
+
+                const latencyText = rawLatency > 0 ? `${rawLatency.toFixed(1)} ms` : 'N/A';
+                const downloadText = rawDownload > 0 ? `${rawDownload.toFixed(1)} Mbps` : '0.0 Mbps';
+
+                internetLatencyVal.textContent = latencyText;
+                internetDownloadVal.textContent = downloadText;
+
+                // Update charts with raw numeric data
+                updateCharts(rawLatency, rawDownload);
+
+            } catch (error) {
+                console.error("Simplified Internet Test Failed:", error);
+                internetLatencyVal.textContent = 'Failed';
+                internetDownloadVal.textContent = 'Failed';
+                // Push failed data (0) to charts to show a drop
+                updateCharts(0, 0);
+            }
+        }
+        // END INTERNET HEALTH PANEL FUNCTIONS
+
+        async function testNetworkSpeed() {
+             // Only show 'Testing...' on the initial load if it's currently showing default values
+            if (speedText.textContent.includes('Test') || speedText.textContent.includes('--')) {
+                speedText.textContent = 'Testing...';
+                speedDisplay.classList.remove('status-online', 'status-offline', 'speed-warning');
+                speedDisplay.classList.add('status-offline');
+            }
+
+            try {
+                const downloadStart = performance.now();
+                const downloadResponse = await fetch(API_URL + '?speed_test=download&size=20');
+                const downloadData = await downloadResponse.text();
+                const downloadEnd = performance.now();
+
+                const downloadTime = (downloadEnd - downloadStart) / 1000;
+                const downloadBytes = new Blob([downloadData]).size;
+                const downloadMbps = ((downloadBytes * 8) / (1024 * 1024)) / downloadTime;
+
+                const uploadData = 'x'.repeat(50000);
+                const uploadStart = performance.now();
+                await fetch(API_URL + '?speed_test=upload', {
+                    method: 'POST',
+                    body: uploadData
+                });
+                const uploadEnd = performance.now();
+
+                const uploadTime = (uploadEnd - uploadStart) / 1000;
+                const uploadBytes = new Blob([uploadData]).size;
+                const uploadMbps = ((uploadBytes * 8) / (1024 * 1024)) / uploadTime;
+
+                const downSpeed = downloadMbps.toFixed(1);
+                const upSpeed = uploadMbps.toFixed(1);
+                speedText.innerHTML = `${downSpeed} Mbps ↓ / ${upSpeed} Mbps ↑`;
+                speedDisplay.classList.remove('status-offline');
+
+                // Check if download speed is below 10 Mbps threshold
+                const isSlowSpeed = downloadMbps < 10;
+
+                if (isSlowSpeed) {
+                    speedDisplay.classList.add('speed-warning');
+                    if (!previousSpeedWarning) {
+                        speedDisplay.classList.add('single-flash'); // Use the new single-flash class
+                        setTimeout(() => speedDisplay.classList.remove('single-flash'), 600);
+                    }
+                } else {
+                    speedDisplay.classList.add('status-online');
+                    if (previousSpeedWarning) {
+                        speedDisplay.classList.add('single-flash'); // Use the new single-flash class
+                        setTimeout(() => speedDisplay.classList.remove('single-flash'), 600);
+                    }
+                }
+
+                previousSpeedWarning = isSlowSpeed;
+
+            } catch (error) {
+                console.error("Speed test failed:", error);
+                speedText.textContent = 'Test Failed';
+                speedDisplay.classList.remove('status-online', 'speed-warning');
+                speedDisplay.classList.add('status-offline');
+                previousSpeedWarning = false;
+            }
+        }
+
+        /* * OPTIMIZED fetchServerData:
+         * **CRITICAL CHANGE:** Implemented fix to update service list even if the main server status (online/offline) doesn't change.
+         */
+        async function fetchServerData() {
+
+            testNetworkSpeed();
+
+            // Keep the loading spinner visible only on the initial load
+            if (listContainer.children.length === 0 || (listContainer.children.length === 1 && listContainer.firstElementChild.id === 'loading-status')) {
+                listContainer.innerHTML = '';
+                listContainer.appendChild(loadingStatusElement);
+                loadingStatusElement.innerHTML = '<i class="fa fa-spinner fa-spin spinner"></i> Fetching server status...';
+            }
+
+            try {
+                const response = await fetch(API_URL);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                const servers = data.servers;
+                const wanStatus = data.wan_status || 'Unknown';
+
+                // --- WAN Status Update (updates badges and applies animation) ---
+                updateWanStatus(wanStatus);
+                lastUpdatedSpan.textContent = new Date().toLocaleTimeString();
+
+                if (data.error) {
+                    listContainer.innerHTML = `<p style="color: var(--danger); grid-column: 1 / -1; text-align: center; padding: 40px;">Error: ${data.error}</p>`;
+                    return;
+                }
+
+                // Update server config data for the edit panel
+                serverConfigData.servers = servers.map(s => ({
+                    hostname: s.ip.match(/:\s*(.+)$/) ? s.ip.match(/:\s*(.+)$/)[1] : s.ip.split(' ')[0],
+                    name: s.name,
+                    icon: s.icon || '🖥️',
+                    category: s.category || '99'
+                }));
+
+
+                // --- Server List Update ---
+                const existingServerCards = Array.from(listContainer.querySelectorAll('.server-card'));
+                const activeServerKeys = [];
+
+                servers.forEach(server => {
+                    const serverKey = server.name;
+                    // Sanitize key for use in HTML ID attribute
+                    const cardId = `server-card-${serverKey.replace(/[^\w-]/g, '-')}`;
+                    activeServerKeys.push(serverKey);
+
+                    let card = document.getElementById(cardId);
+                    const isNewCard = !card; // Check if card exists BEFORE trying to access it
+                    const isOnline = server.status.toLowerCase() === 'online';
+                    const displayedStatus = isOnline ? 'Online' : 'Offline';
+                    const statusClass = isOnline ? 'status-online' : 'status-offline';
+                    const serverIcon = server.icon || '🖥️';
+
+                    // Check for status change based on previous state
+                    let statusChanged = previousServerStates[serverKey] !== undefined && previousServerStates[serverKey] !== isOnline;
+
+                    // CRITICAL FIX: Check if the services JSON has changed.
+                    const currentServicesJson = server.services ? JSON.stringify(server.services) : 'null';
+                    const previousServicesJson = previousServerStates[`${serverKey}_services`] || 'null';
+                    const servicesChanged = currentServicesJson !== previousServicesJson;
+                    // Store current services JSON for next comparison
+                    previousServerStates[`${serverKey}_services`] = currentServicesJson;
+
+
+                    // Prepare dynamic content (Service List and IP Link)
+                    const ipMatch = server.ip.match(/^([0-9.]+)\s*:\s*(.+)$/);
+                    let ipAddressLink = server.ip;
+                    if (ipMatch) {
+                        const ipOnly = ipMatch[1];
+                        const hostname = ipMatch[2];
+                        ipAddressLink = `<a href="http://${ipOnly}" target="_blank" style="color: var(--primary); text-decoration: none; border-bottom: 1px dotted var(--primary);">${ipOnly}</a> : ${hostname}`;
+                    } else if (server.ip.match(/^[0-9.]+$/)) {
+                        ipAddressLink = `<a href="http://${server.ip}" target="_blank" style="color: var(--primary); text-decoration: none; border-bottom: 1px dotted var(--primary);">${server.ip}</a>`;
+                    }
+
+                    const serviceListHtml = server.services
+                        ? createServiceList(server.services)
+                        : (isOnline
+                            ? '<p><span class="data-label">Services</span></p><p style="color: var(--text-secondary); margin-top: 16px;">No services defined for this server.</p>'
+                            : '<p><span class="data-label">Services</span></p><p style="color: var(--text-secondary); margin-top: 16px;">Services unavailable (server offline)</p>'
+                          );
+
+                    // 1. If the card doesn't exist (new server or first load), create it.
+                    if (isNewCard) {
+                        card = document.createElement('div');
+                        card.className = 'server-card';
+                        card.id = cardId;
+                        card.innerHTML = `
+                            <h2><span class="server-icon">${serverIcon}</span>${server.name}</h2>
+                            <span class="status-badge ${statusClass}">${displayedStatus}</span>
+                            <p><span class="data-label">Address:</span> ${ipAddressLink}</p>
+                            <div class="service-container">${serviceListHtml}</div>
+                        `;
+                        listContainer.appendChild(card);
+                        statusChanged = true; // Treat new card as a change for animation
+                    }
+                    // 2. If the card exists, *only update the dynamic elements* if the status has changed OR if services changed.
+                    else if (statusChanged || servicesChanged) {
+                        // Only update the badge if the main status changed
+                        if (statusChanged) {
+                            const statusBadge = card.querySelector('.status-badge');
+                            statusBadge.textContent = displayedStatus;
+                            statusBadge.className = `status-badge ${statusClass}`;
+                        }
+
+                        // Update IP Link (as it depends on server.ip format and status)
+                        card.querySelector('p:nth-of-type(1)').innerHTML = `<span class="data-label">Address:</span> ${ipAddressLink}`;
+
+                        // Update Services Container (Service list must be updated if either server status or services content changes)
+                        card.querySelector('.service-container').innerHTML = serviceListHtml;
+                    }
+
+                    // --- NEW ANIMATION LOGIC (REPLACING OLD status-changed) ---
+
+                    // Determine which animation to apply based on the user's priority
+                    let animationName = null;
+
+                    // Priority 1: Service change only (double flash)
+                    if (servicesChanged && !statusChanged && !isNewCard) {
+                        animationName = 'doubleFlash';
+                    } else if (statusChanged || isNewCard) {
+                        // Priority 2: Server status change (single flash) OR initial load
+                        animationName = 'singleFlash';
+                    }
+
+                    // Apply animation if needed
+                    if (animationName) {
+                        const animationClass = animationName === 'singleFlash' ? 'single-flash' : 'double-flash';
+                        setTimeout(() => {
+                            // Apply the new animation class
+                            card.classList.remove('single-flash', 'double-flash'); // Clear previous animations
+                            card.classList.add(animationClass);
+                            setTimeout(() => card.classList.remove(animationClass), 600);
+                        }, 10);
+                    }
+
+                    // Update stored state for next refresh
+                    previousServerStates[serverKey] = isOnline;
+                });
+
+                // 3. Remove cards for servers no longer in the config
+                existingServerCards.forEach(card => {
+                    const cardName = card.querySelector('h2').textContent.slice(2).trim(); // Extract name from H2 after icon
+                    if (!activeServerKeys.includes(cardName)) {
+                        card.remove();
+                        delete previousServerStates[cardName];
+                        delete previousServerStates[`${cardName}_services`]; // Clean up the service state too
+                    }
+                });
+
+                // Remove loading status after the first successful fetch
+                if (loadingStatusElement.parentElement === listContainer) {
+                    listContainer.removeChild(loadingStatusElement);
+                }
+
+            } catch (error) {
+                console.error("Failed to fetch server data:", error);
+
+                // Set status to 'Error' only if the previous state wasn't already 'Error' or 'Offline'
+                if (previousServerStates['WAN'] !== false) {
+                    updateWanStatus("Error");
+                }
+
+                if (!listContainer.querySelector('.server-card')) {
+                    listContainer.innerHTML = `<p style="color: var(--danger); grid-column: 1 / -1; text-align: center; padding: 40px;">Connection failed: ${error.message}</p>`;
+                }
+            }
+        }
+        /* END OPTIMIZED fetchServerData */
+
+
+        // --- SCAN FUNCTIONALITY (No changes needed, kept for completeness) ---
+        function isServerConfigured(hostname, ip) {
+            const normalizedHostname = hostname ? hostname.toLowerCase() : null;
+            const normalizedIp = ip ? ip.toLowerCase() : null;
+
+            return serverConfigData.servers.some(server => {
+                const serverHost = server.hostname.toLowerCase();
+                return serverHost === normalizedIp || (normalizedHostname && serverHost.includes(normalizedHostname));
+            });
+        }
+
+        function renderScanResults(devices) {
+            scanResultsList.innerHTML = '';
+
+            const unconfiguredDevices = devices.filter(device =>
+                !isServerConfigured(device.hostname, device.ip)
+            );
+
+            if (unconfiguredDevices.length === 0) {
+                scanResultsList.innerHTML = '<p style="color: var(--text-secondary);">No new devices found or all discovered devices are configured.</p>';
+                return;
+            }
+
+            unconfiguredDevices.forEach(device => {
+                const card = document.createElement('div');
+                card.className = 'server-card';
+                card.style.opacity = 0.9;
+
+                const displayName = device.hostname && device.hostname !== device.ip
+                                    ? device.hostname.split('.')[0]
+                                    : 'Unknown Device';
+
+                card.innerHTML = `
+                    <h2><span class="server-icon">❓</span>${displayName}</h2>
+                    <span class="status-badge status-online" style="background: rgba(37, 99, 235, 0.2); color: var(--primary); border-color: var(--primary);">New</span>
+                    <p><span class="data-label">IP:</span> ${device.ip}</p>
+                    <p><span class="data-label">Hostname:</span> ${device.hostname || 'N/A'}</p>
+                    <p><span class="data-label">MAC:</span> ${device.mac || 'N/A'}</p>
+                    <button class="add-server-from-scan-btn"
+                            onclick="addScannedDeviceToConfig('${displayName.replace(/'/g, "\\'")}', '${device.ip.replace(/'/g, "\\'")}', this)">
+                        <i class="fa fa-plus-circle"></i> Add to Servers
+                    </button>
+                `;
+                scanResultsList.appendChild(card);
+            });
+        }
+
+        async function startNetworkScan() {
+            startScanBtn.disabled = true;
+            startScanBtn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Scanning...';
+            scanStatusElement.textContent = 'Scanning in progress. This can take 5 minutes.....';
+            scanResultsList.innerHTML = '';
+
+            try {
+                const response = await fetch(SCAN_API_URL);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (data.error || !data.success) {
+                    throw new Error(data.error || 'Scan script returned an error.');
+                }
+
+                scanStatusElement.textContent = `Scan complete at ${new Date().toLocaleTimeString()}. Scanned range: ${data.scanned_range}.`;
+                renderScanResults(data.devices);
+
+            } catch (error) {
+                console.error("Network scan failed:", error);
+                scanStatusElement.innerHTML = `<p style="color: var(--danger);">Scan failed: ${error.message}</p>`;
+                scanResultsList.innerHTML = '<p style="color: var(--text-secondary);">Could not complete the network scan. Check browser console for details.</p>';
+            } finally {
+                startScanBtn.disabled = false;
+                startScanBtn.innerHTML = '<i class="fa fa-search"></i> Scan Network';
+            }
+        }
+
+        async function addScannedDeviceToConfig(name, hostname, button) {
+            const newServer = {
+                name: name,
+                hostname: hostname,
+                icon: '🖥️',
+                category: '99'
+            };
+
+            serverConfigData.servers.push(newServer);
+
+            button.textContent = 'Saving...';
+            button.disabled = true;
+            button.style.background = 'var(--warning)';
+
+            try {
+                const dataToSend = { servers: serverConfigData.servers };
+
+                const response = await fetch(SAVE_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(dataToSend)
+                });
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    button.textContent = 'Added & Saved! ✓';
+                    button.style.background = 'var(--success)';
+
+                    showMessage(`Device '${name}' added and configuration saved successfully!`, 'success');
+
+                    setTimeout(() => {
+                        const card = button.closest('.server-card');
+                        if (card) card.remove();
+                        if (scanResultsList.children.length === 0) {
+                            scanResultsList.innerHTML = '<p style="color: var(--text-secondary);">No new devices found or all discovered devices are configured.</p>';
+                        }
+                        fetchServerData();
+                    }, 500);
+
+                } else {
+                    throw new Error(result.message || 'Server save failed.');
+                }
+            } catch (error) {
+                console.error("Auto-save error:", error);
+
+                button.textContent = 'Add to Servers';
+                button.disabled = false;
+                button.style.background = 'var(--primary)';
+
+                serverConfigData.servers.pop();
+
+                showMessage(`Auto-save failed: ${error.message}. Please click 'Manage Servers' and 'Save Changes' manually.`, 'error');
+            }
+        }
+        // --- END SCAN FUNCTIONALITY ---
+
+
+        function updateIconPreview(selectElement) {
+            const previewSpan = selectElement.parentElement.querySelector('.icon-preview');
+            if (previewSpan) {
+                previewSpan.textContent = selectElement.value;
+            }
+        }
+
+        function renderEditInputs() {
+            serverInputsContainer.innerHTML = '';
+            serverConfigData.servers.forEach((server, index) => {
+                const group = document.createElement('div');
+                group.className = 'server-input-group';
+                group.setAttribute('data-index', index);
+
+                let iconOptions = '';
+                for (const [emoji, label] of Object.entries(serverIcons)) {
+                    const selected = server.icon === emoji ? 'selected' : '';
+                    iconOptions += `<option value="${emoji}" ${selected}>${emoji} ${label}</option>`;
+                }
+
+                let categoryOptions = '';
+                const currentCategory = server.category || '99';
+                serverCategories.forEach(category => {
+                    const selected = currentCategory === category.value ? 'selected' : '';
+                    categoryOptions += `<option value="${category.value}" ${selected}>${category.label}</option>`;
+                });
+
+
+                group.innerHTML = `
+                    <button class="remove-server-btn" onclick="removeServerInput(this)"><i class="fa fa-times"></i></button>
+                    <label>Server Icon <span class="icon-preview">${server.icon || '🖥️'}</span></label>
+                    <select data-field="icon" onchange="updateIconPreview(this)">
+                        ${iconOptions}
+                    </select>
+                    <label>Display Name</label>
+                    <input type="text" data-field="name" value="${server.name}" placeholder="e.g., Production Server">
+                    <label>Hostname <span style="font-weight: normal; text-transform: none; color: var(--text-secondary);">(enter the local server name e.g. MyServer.local, or IP address)</span></label>
+                    <input type="text" data-field="hostname" value="${server.hostname}" placeholder="e.g., server.local or 192.168.1.100">
+                    <label>Server Type Classification</label>
+                    <select data-field="category">
+                        ${categoryOptions}
+                    </select>
+                `;
+                serverInputsContainer.appendChild(group);
+            });
+        }
+
+        function addServerInput() {
+            serverConfigData.servers.push({ name: '', hostname: '', icon: '🖥️', category: '99' });
+            renderEditInputs();
+        }
+
+        function removeServerInput(button) {
+            const group = button.closest('.server-input-group');
+            const currentIndex = Array.from(serverInputsContainer.children).indexOf(group);
+            serverConfigData.servers.splice(currentIndex, 1);
+            renderEditInputs();
+        }
+
+        function collectInputData() {
+            const newServers = [];
+            let isValid = true;
+
+            Array.from(serverInputsContainer.children).forEach(group => {
+                const iconSelect = group.querySelector('select[data-field="icon"]');
+                const nameInput = group.querySelector('input[data-field="name"]');
+                const hostnameInput = group.querySelector('input[data-field="hostname"]');
+                const categorySelect = group.querySelector('select[data-field="category"]');
+
+                const icon = iconSelect.value;
+                const name = nameInput.value.trim();
+                const hostname = hostnameInput.value.trim();
+                const category = categorySelect.value;
+
+                if (name === "" || hostname === "") {
+                    nameInput.style.borderColor = name === "" ? 'var(--danger)' : '';
+                    hostnameInput.style.borderColor = hostname === "" ? 'var(--danger)' : '';
+                    isValid = false;
+                } else {
+                    nameInput.style.borderColor = '';
+                    hostnameInput.style.borderColor = '';
+                    newServers.push({ name: name, hostname: hostname, icon: icon, category: category });
+                }
+            });
+
+            if (!isValid) {
+                showMessage("All fields are required. Please complete the form.", 'error');
+                return null;
+            }
+            return { servers: newServers };
+        }
+
+        async function saveServers() {
+            const dataToSend = collectInputData();
+            if (!dataToSend) return;
+
+            showMessage('<i class="fa fa-spinner fa-spin"></i> Applying configuration...', 'neutral');
+
+            try {
+                const response = await fetch(SAVE_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(dataToSend)
+                });
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    showMessage("Configuration applied successfully!", 'success');
+                    serverConfigData = dataToSend;
+                    setTimeout(() => {
+                        toggleEditPanel();
+                        fetchServerData();
+                    }, 1000);
+                } else {
+                    throw new Error(result.message || 'Save operation failed');
+                }
+            } catch (error) {
+                console.error("Save error:", error);
+                showMessage("Failed to save: " + error.message, 'error');
+            }
+        }
+
+        function toggleEditPanel() {
+            if (internetPanel.style.display === 'block') {
+                toggleInternetPanel();
+            }
+
+            if (editPanel.style.display === 'block') {
+                editPanel.style.display = 'none';
+                editMessage.style.display = 'none';
+            } else {
+                renderEditInputs();
+                editPanel.style.display = 'block';
+                editMessage.style.display = 'none';
+            }
+        }
+
+        function showMessage(message, type) {
+            editMessage.innerHTML = message;
+            editMessage.className = '';
+            editMessage.classList.add('msg-' + type);
+            editMessage.style.display = 'block';
+        }
+
+        fetchServerData();
+        setInterval(fetchServerData, REFRESH_INTERVAL);
+
+        window.onfocus = function () {
+            fetchServerData();
+        };
+    </script>
+</body>
+</html>

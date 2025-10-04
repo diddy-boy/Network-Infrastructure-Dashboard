@@ -1,0 +1,16 @@
+{
+    "servers": [
+        {
+            "name": "Home Router",
+            "hostname": "192.168.8.1",
+            "icon": "\ud83c\udf10",
+            "category": "10"
+        },
+        {
+            "name": "Home Server",
+            "hostname": "YOUR-SERVER-NAME.local",
+            "icon": "\ud83d\udce1",
+            "category": "20"
+        }
+    ]
+}
