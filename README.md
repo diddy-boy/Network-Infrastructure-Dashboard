@@ -1,7 +1,7 @@
 Prerequisites and Setup Instructions
 This project is only intended for Linux users with a good understanding of running and adminsitrating Linux and Apache.
 Download all 5 files and place them in your apache WWW directory.
-use the instructions below to edit a couple of files annd then access this dashboard by using your web browser to your apache servers ip address and add /server_status.html
+use the instructions below to edit a couple of files and then access this dashboard by using your web browser to your apache servers ip address and add /server_status.html
 
 1. Server Environment Requirements
 The scripts require a standard PHP web server setup. Users must have:
