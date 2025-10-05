@@ -770,11 +770,21 @@
     <div id="internet-panel" class="edit-panel" style="max-width: 500px;">
         <h2><i class="fa fa-heartbeat"></i> Detailed Internet Health</h2>
         <div id="internet-panel-content">
-            <p id="internet-panel-latency">Latency (Ping): <span id="internet-latency-val">--</span></p>
-            <p id="internet-panel-download">Download Speed: <span id="internet-download-val">--</span></p>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;">
+                <div style="text-align: center;">
+                    <h3 style="color: var(--text-primary); font-size: 1rem; margin-bottom: 10px;">Latency</h3>
+                    <canvas id="latencyGauge" width="200" height="120"></canvas>
+                    <p id="internet-latency-val" style="margin-top: 5px; font-size: 1.5rem; font-weight: 700; color: var(--primary);">--</p>
+                </div>
+                <div style="text-align: center;">
+                    <h3 style="color: var(--text-primary); font-size: 1rem; margin-bottom: 10px;">Download Speed</h3>
+                    <canvas id="downloadGauge" width="200" height="120"></canvas>
+                    <p id="internet-download-val" style="margin-top: 5px; font-size: 1.5rem; font-weight: 700; color: var(--success);">--</p>
+                </div>
+            </div>
 
             <h3 style="margin-top: 20px; color: var(--text-primary); font-size: 1.2rem;">Latency History (ms)</h3>
-            <div style="height: 150px; margin-bottom: 20px;">
+            <div style="height: 100px; margin-bottom: 15px;">
                 <canvas id="latencyChart"></canvas>
             </div>
 
@@ -849,6 +859,12 @@
         let downloadHistory = [];
         let latencyChartInstance = null;
         let speedChartInstance = null;
+        let latencyGaugeCanvas = null;
+        let downloadGaugeCanvas = null;
+        let currentLatency = 0;
+        let currentDownload = 0;
+        let maxLatencyScale = 200;
+        let maxDownloadScale = 100;
 
         // SCAN ELEMENTS
         const scanStatusElement = document.getElementById('scan-status');
@@ -919,8 +935,135 @@
             previousServerStates[wanKey] = wanIsOnline;
         }
 
+        function drawSemiCircularGauge(canvas, value, maxValue, color, label, animate = true) {
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            const centerX = width / 2;
+            const centerY = height - 10;
+            const radius = Math.min(width, height * 2) / 2 - 20;
+
+            // Get or initialize animation state
+            if (!canvas.animationState) {
+                canvas.animationState = {
+                    currentValue: 0,
+                    targetValue: value,
+                    currentMax: maxValue,
+                    targetMax: maxValue
+                };
+            }
+
+            const state = canvas.animationState;
+            state.targetValue = value;
+            state.targetMax = maxValue;
+
+            // Animate towards target
+            if (animate) {
+                const valueStep = (state.targetValue - state.currentValue) * 0.15;
+                const maxStep = (state.targetMax - state.currentMax) * 0.15;
+
+                state.currentValue += valueStep;
+                state.currentMax += maxStep;
+
+                // Continue animation if not close enough
+                if (Math.abs(state.targetValue - state.currentValue) > 0.1 ||
+                    Math.abs(state.targetMax - state.currentMax) > 0.1) {
+                    requestAnimationFrame(() => drawSemiCircularGauge(canvas, value, maxValue, color, label, true));
+                }
+            } else {
+                state.currentValue = value;
+                state.currentMax = maxValue;
+            }
+
+            const displayValue = state.currentValue;
+            const displayMax = state.currentMax;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, width, height);
+
+            // Background arc
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, Math.PI, 2 * Math.PI);
+            ctx.lineWidth = 20;
+            ctx.strokeStyle = 'rgba(71, 85, 105, 0.3)';
+            ctx.stroke();
+
+            // Value arc
+            const percentage = Math.min(displayValue / displayMax, 1);
+            const endAngle = Math.PI + (percentage * Math.PI);
+
+            // Determine color based on value exceeding scale
+            let gaugeColor = color;
+            if (displayValue > displayMax) {
+                gaugeColor = '#f59e0b'; // Warning color if exceeding scale
+            }
+
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, Math.PI, endAngle);
+            ctx.lineWidth = 20;
+            ctx.strokeStyle = gaugeColor;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+
+            // Center text - value
+            ctx.fillStyle = displayValue > displayMax ? '#f59e0b' : '#e2e8f0';
+            ctx.font = 'bold 24px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const displayText = displayValue > 0 ? displayValue.toFixed(1) : '--';
+            ctx.fillText(displayText, centerX, centerY - 15);
+
+            // Label text
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto';
+            ctx.fillText(label, centerX, centerY + 10);
+
+            // Min/Max labels
+            ctx.fillStyle = '#64748b';
+            ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto';
+            ctx.textAlign = 'left';
+            ctx.fillText('0', 15, centerY + 5);
+            ctx.textAlign = 'right';
+            ctx.fillText(Math.round(displayMax).toString(), width - 15, centerY + 5);
+        }
+
+        function updateGaugeScales(latency, download) {
+            // Update latency scale if needed (with some headroom)
+            if (latency > maxLatencyScale * 0.9) {
+                maxLatencyScale = Math.ceil(latency * 1.2 / 50) * 50; // Round up to nearest 50
+            }
+
+            // Update download scale if needed (with some headroom)
+            if (download > maxDownloadScale * 0.9) {
+                maxDownloadScale = Math.ceil(download * 1.2 / 50) * 50; // Round up to nearest 50
+            }
+
+            // Optional: Scale down if values are consistently much lower (after 10+ readings)
+            if (latencyHistory.length > 10) {
+                const maxLatency = Math.max(...latencyHistory.map(h => h.y));
+                if (maxLatency < maxLatencyScale * 0.5 && maxLatencyScale > 200) {
+                    maxLatencyScale = Math.max(200, Math.ceil(maxLatency * 1.5 / 50) * 50);
+                }
+            }
+
+            if (downloadHistory.length > 10) {
+                const maxDownload = Math.max(...downloadHistory.map(h => h.y));
+                if (maxDownload < maxDownloadScale * 0.5 && maxDownloadScale > 100) {
+                    maxDownloadScale = Math.max(100, Math.ceil(maxDownload * 1.5 / 50) * 50);
+                }
+            }
+        }
         // CHARTING FUNCTIONS
         function initCharts() {
+            // Initialize gauge canvases
+            latencyGaugeCanvas = document.getElementById('latencyGauge');
+            downloadGaugeCanvas = document.getElementById('downloadGauge');
+
+            // Draw initial gauges with current scales
+            drawSemiCircularGauge(latencyGaugeCanvas, currentLatency, maxLatencyScale, '#3b82f6', 'ms');
+            drawSemiCircularGauge(downloadGaugeCanvas, currentDownload, maxDownloadScale, '#10b981', 'Mbps');
+
+            // Chart.js options for time series data
             // Chart.js options for time series data
             const chartOptions = (color, minVal) => ({
                 responsive: true,
@@ -1043,10 +1186,7 @@
             }
         }
 
-        async function startSimplifiedInternetTest() {
-            internetLatencyVal.textContent = 'Testing...';
-            internetDownloadVal.textContent = 'Testing...';
-
+       async function startSimplifiedInternetTest() {
             try {
                 const response = await fetch(API_URL + '?simplified_ping=true');
                 const data = await response.json();
@@ -1058,19 +1198,36 @@
                 const rawLatency = data.latency_ms > 0 ? data.latency_ms : 0;
                 const rawDownload = data.download_mbps > 0 ? data.download_mbps : 0;
 
+                // Update stored current values
+                currentLatency = rawLatency;
+                currentDownload = rawDownload;
+
+                // Update gauge scales dynamically
+                updateGaugeScales(rawLatency, rawDownload);
+
                 const latencyText = rawLatency > 0 ? `${rawLatency.toFixed(1)} ms` : 'N/A';
                 const downloadText = rawDownload > 0 ? `${rawDownload.toFixed(1)} Mbps` : '0.0 Mbps';
 
                 internetLatencyVal.textContent = latencyText;
                 internetDownloadVal.textContent = downloadText;
 
+                // Update gauges with dynamic scales
+                if (latencyGaugeCanvas && downloadGaugeCanvas) {
+                    drawSemiCircularGauge(latencyGaugeCanvas, rawLatency, maxLatencyScale, '#3b82f6', 'ms');
+                    drawSemiCircularGauge(downloadGaugeCanvas, rawDownload, maxDownloadScale, '#10b981', 'Mbps');
+                }
+
                 // Update charts with raw numeric data
                 updateCharts(rawLatency, rawDownload);
 
             } catch (error) {
                 console.error("Simplified Internet Test Failed:", error);
-                internetLatencyVal.textContent = 'Failed';
-                internetDownloadVal.textContent = 'Failed';
+                // Keep current values instead of showing "Failed"
+                // Only update if we don't have any values yet
+                if (currentLatency === 0 && currentDownload === 0) {
+                    internetLatencyVal.textContent = 'Failed';
+                    internetDownloadVal.textContent = 'Failed';
+                }
                 // Push failed data (0) to charts to show a drop
                 updateCharts(0, 0);
             }
