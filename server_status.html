@@ -44,7 +44,7 @@
             display: grid;
             grid-template-columns: 1fr auto 1fr;
             align-items: center;
-            padding: 20px 40px;
+            padding: 20px 40px 10px 40px;
             background: rgba(15, 23, 42, 0.95);
             backdrop-filter: blur(10px);
             border-bottom: 1px solid var(--border);
@@ -148,6 +148,63 @@
             animation: doubleFlash 0.6s ease-in-out;
         }
 
+        /* Header Gauge Styles */
+        .header-gauge-container {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+        }
+
+        .header-gauge-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .header-gauge-label {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+        }
+
+        .header-gauge-value {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-top: -5px;
+        }
+
+        .wan-circle-indicator {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+            margin: 5px auto;
+        }
+
+        .wan-circle-indicator.status-online {
+            background: linear-gradient(135deg, var(--success) 0%, #059669 100%);
+            color: white;
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+        }
+
+        .wan-circle-indicator.status-offline {
+            background: linear-gradient(135deg, var(--danger) 0%, #c22f2f 100%);
+            color: white;
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
+        }
+
+        .wan-circle-indicator i {
+            animation: pulse 2s ease-in-out infinite;
+        }
 
         .speed-warning {
             background: rgba(245, 158, 11, 0.2) !important;
@@ -747,11 +804,24 @@
 
         <h1>Network Infrastructure Dashboard</h1>
 
-        <div style="display: flex; gap: 12px; align-items: center; justify-self: end;">
-            <span id="network-speed-display" class="status-badge status-offline" style="font-size: 0.75rem; padding: 6px 12px;">
-                <i class="fa fa-tachometer"></i> <span id="speed-text">Testing...</span>
-            </span>
-            <span id="wan-status-display" class="status-badge status-offline wan-status-badge">Internet: Checking...</span>
+        <div class="header-gauge-container" style="justify-self: end;">
+            <div class="header-gauge-item">
+                <span class="header-gauge-label">Network Download</span>
+                <canvas id="headerDownloadGauge" width="80" height="50"></canvas>
+                <span id="header-download-value" class="header-gauge-value">-- Mbps</span>
+            </div>
+            <div class="header-gauge-item">
+                <span class="header-gauge-label">Network Upload</span>
+                <canvas id="headerUploadGauge" width="80" height="50"></canvas>
+                <span id="header-upload-value" class="header-gauge-value">-- Mbps</span>
+            </div>
+            <div class="header-gauge-item" style="margin-left: 15px;">
+                <span class="header-gauge-label">Network Status</span>
+                <div id="wan-status-circle" class="wan-circle-indicator status-offline">
+                    <i class="fa fa-globe"></i>
+                </div>
+                <span id="wan-status-text" class="header-gauge-value">Checking</span>
+            </div>
         </div>
     </div>
 
@@ -842,10 +912,7 @@
         const editPanel = document.getElementById('edit-panel');
         const serverInputsContainer = document.getElementById('server-inputs-container');
         const editMessage = document.getElementById('edit-message');
-        const wanDisplay = document.getElementById('wan-status-display');
         const lastUpdatedSpan = document.getElementById('last-updated');
-        const speedDisplay = document.getElementById('network-speed-display');
-        const speedText = document.getElementById('speed-text');
 
         // INTERNET HEALTH ELEMENTS
         const internetPanel = document.getElementById('internet-panel');
@@ -865,6 +932,12 @@
         let currentDownload = 0;
         let maxLatencyScale = 200;
         let maxDownloadScale = 100;
+        let headerDownloadGaugeCanvas = null;
+        let headerUploadGaugeCanvas = null;
+        let currentHeaderDownload = 0;
+        let currentHeaderUpload = 0;
+        let maxHeaderDownloadScale = 100;
+        let maxHeaderUploadScale = 20;
 
         // SCAN ELEMENTS
         const scanStatusElement = document.getElementById('scan-status');
@@ -873,7 +946,6 @@
 
         let serverConfigData = { servers: [] };
         let previousServerStates = {};
-        let previousSpeedWarning = false;
 
         // Available server icons
         const serverIcons = {
@@ -915,7 +987,10 @@
 
         function updateWanStatus(status) {
             const wanIsOnline = status.toLowerCase() === 'online';
-            wanDisplay.textContent = `Internet: ${status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()}`;
+            const wanCircle = document.getElementById('wan-status-circle');
+            const wanText = document.getElementById('wan-status-text');
+
+            wanText.textContent = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
 
             // Check for status change based on previous state
             const wanKey = 'WAN';
@@ -923,16 +998,102 @@
 
             // Only update classes/animation if status changed or it's the initial load
             if (wanStateChanged || previousServerStates[wanKey] === undefined) {
-                 wanDisplay.classList.remove('status-online', 'status-offline');
-                 wanDisplay.classList.add(wanIsOnline ? 'status-online' : 'status-offline');
+                wanCircle.classList.remove('status-online', 'status-offline');
+                wanCircle.classList.add(wanIsOnline ? 'status-online' : 'status-offline');
 
-                 if (wanStateChanged) {
-                    wanDisplay.classList.add('single-flash'); // Use the new single-flash class
-                    setTimeout(() => wanDisplay.classList.remove('single-flash'), 600);
+                if (wanStateChanged) {
+                    wanCircle.classList.add('single-flash');
+                    setTimeout(() => wanCircle.classList.remove('single-flash'), 600);
                 }
             }
 
             previousServerStates[wanKey] = wanIsOnline;
+        }
+
+        function drawCompactHeaderGauge(canvas, value, maxValue, color) {
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            const centerX = width / 2;
+            const centerY = height - 5;
+            const radius = Math.min(width, height * 2) / 2 - 10;
+
+            // Get or initialize animation state
+            if (!canvas.animationState) {
+                canvas.animationState = {
+                    currentValue: 0,
+                    targetValue: value,
+                    currentMax: maxValue,
+                    targetMax: maxValue
+                };
+            }
+
+            const state = canvas.animationState;
+            state.targetValue = value;
+            state.targetMax = maxValue;
+
+            // Animate towards target
+            const valueStep = (state.targetValue - state.currentValue) * 0.15;
+            const maxStep = (state.targetMax - state.currentMax) * 0.15;
+
+            state.currentValue += valueStep;
+            state.currentMax += maxStep;
+
+            // Continue animation if not close enough
+            if (Math.abs(state.targetValue - state.currentValue) > 0.1 ||
+                Math.abs(state.targetMax - state.currentMax) > 0.1) {
+                requestAnimationFrame(() => drawCompactHeaderGauge(canvas, value, maxValue, color));
+            }
+
+            const displayValue = state.currentValue;
+            const displayMax = state.currentMax;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, width, height);
+
+            // Background arc
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, Math.PI, 2 * Math.PI);
+            ctx.lineWidth = 8;
+            ctx.strokeStyle = 'rgba(71, 85, 105, 0.3)';
+            ctx.stroke();
+
+            // Value arc
+            const percentage = Math.min(displayValue / displayMax, 1);
+            const endAngle = Math.PI + (percentage * Math.PI);
+
+            // Determine color based on value exceeding scale
+            let gaugeColor = color;
+            if (displayValue > displayMax) {
+                gaugeColor = '#f59e0b';
+            }
+
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, Math.PI, endAngle);
+            ctx.lineWidth = 8;
+            ctx.strokeStyle = gaugeColor;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+
+            // Center text - value
+            ctx.fillStyle = displayValue > displayMax ? '#f59e0b' : '#e2e8f0';
+            ctx.font = 'bold 14px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const displayText = displayValue > 0 ? displayValue.toFixed(0) : '--';
+            ctx.fillText(displayText, centerX, centerY - 8);
+        }
+
+        function updateHeaderGaugeScales(download, upload) {
+            // Update download scale if needed
+            if (download > maxHeaderDownloadScale * 0.9) {
+                maxHeaderDownloadScale = Math.ceil(download * 1.2 / 50) * 50;
+            }
+
+            // Update upload scale if needed
+            if (upload > maxHeaderUploadScale * 0.9) {
+                maxHeaderUploadScale = Math.ceil(upload * 1.2 / 10) * 10;
+            }
         }
 
         function drawSemiCircularGauge(canvas, value, maxValue, color, label, animate = true) {
@@ -1235,13 +1396,6 @@
         // END INTERNET HEALTH PANEL FUNCTIONS
 
         async function testNetworkSpeed() {
-             // Only show 'Testing...' on the initial load if it's currently showing default values
-            if (speedText.textContent.includes('Test') || speedText.textContent.includes('--')) {
-                speedText.textContent = 'Testing...';
-                speedDisplay.classList.remove('status-online', 'status-offline', 'speed-warning');
-                speedDisplay.classList.add('status-offline');
-            }
-
             try {
                 const downloadStart = performance.now();
                 const downloadResponse = await fetch(API_URL + '?speed_test=download&size=20');
@@ -1266,34 +1420,24 @@
 
                 const downSpeed = downloadMbps.toFixed(1);
                 const upSpeed = uploadMbps.toFixed(1);
-                speedText.innerHTML = `${downSpeed} Mbps ↓ / ${upSpeed} Mbps ↑`;
-                speedDisplay.classList.remove('status-offline');
 
-                // Check if download speed is below 10 Mbps threshold
-                const isSlowSpeed = downloadMbps < 10;
+                // Update header gauges
+                currentHeaderDownload = downloadMbps;
+                currentHeaderUpload = uploadMbps;
+                updateHeaderGaugeScales(downloadMbps, uploadMbps);
 
-                if (isSlowSpeed) {
-                    speedDisplay.classList.add('speed-warning');
-                    if (!previousSpeedWarning) {
-                        speedDisplay.classList.add('single-flash'); // Use the new single-flash class
-                        setTimeout(() => speedDisplay.classList.remove('single-flash'), 600);
-                    }
-                } else {
-                    speedDisplay.classList.add('status-online');
-                    if (previousSpeedWarning) {
-                        speedDisplay.classList.add('single-flash'); // Use the new single-flash class
-                        setTimeout(() => speedDisplay.classList.remove('single-flash'), 600);
-                    }
+                if (headerDownloadGaugeCanvas && headerUploadGaugeCanvas) {
+                    drawCompactHeaderGauge(headerDownloadGaugeCanvas, downloadMbps, maxHeaderDownloadScale, '#3b82f6');
+                    drawCompactHeaderGauge(headerUploadGaugeCanvas, uploadMbps, maxHeaderUploadScale, '#10b981');
                 }
 
-                previousSpeedWarning = isSlowSpeed;
+                document.getElementById('header-download-value').textContent = `${downSpeed} Mbps`;
+                document.getElementById('header-upload-value').textContent = `${upSpeed} Mbps`;
 
             } catch (error) {
                 console.error("Speed test failed:", error);
-                speedText.textContent = 'Test Failed';
-                speedDisplay.classList.remove('status-online', 'speed-warning');
-                speedDisplay.classList.add('status-offline');
-                previousSpeedWarning = false;
+                document.getElementById('header-download-value').textContent = 'Failed';
+                document.getElementById('header-upload-value').textContent = 'Failed';
             }
         }
 
@@ -1764,7 +1908,14 @@
 
         window.onfocus = function () {
             fetchServerData();
-        };
+        }
+        // Initialize header gauges
+        headerDownloadGaugeCanvas = document.getElementById('headerDownloadGauge');
+        headerUploadGaugeCanvas = document.getElementById('headerUploadGauge');
+        if (headerDownloadGaugeCanvas && headerUploadGaugeCanvas) {
+            drawCompactHeaderGauge(headerDownloadGaugeCanvas, 0, maxHeaderDownloadScale, '#3b82f6');
+            drawCompactHeaderGauge(headerUploadGaugeCanvas, 0, maxHeaderUploadScale, '#10b981');
+        }
     </script>
 </body>
 </html>
